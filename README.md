@@ -1,1 +1,1 @@
-# gdg_monorepo
+# A Monorepo for a submission for GDG On Campus Organiser Technical challenge
