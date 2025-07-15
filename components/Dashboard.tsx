@@ -2,10 +2,10 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { generateCourseRecommendations } from '@/lib/gemini';
+import { generateCourseRecommendations, analyzeTimetable } from '@/lib/gemini';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Calendar, BookOpen, User, LogOut, Brain, Users } from 'lucide-react';
+import { Calendar, BookOpen, User, LogOut, Brain, Users, Upload } from 'lucide-react';
 
 interface CourseRecommendation {
   courseName: string;
@@ -142,15 +142,58 @@ const availableBatches = [
   { id: 'HIS4YR', name: 'HIS4YR - History 4th Year', type: 'undergraduate' }
 ];
 
+interface StudentClass {
+  courseName: string;
+  courseCode: string;
+  day: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+}
+
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const [selectedBatch, setSelectedBatch] = useState<string>('');
   const [availableCourses, setAvailableCourses] = useState<MasterTimetableEntry[]>([]);
   const [recommendations, setRecommendations] = useState<RecommendationGroup[]>([]);
+  const [studentClasses, setStudentClasses] = useState<StudentClass[]>([]);
   const [loading, setLoading] = useState(false);
   const [showRecommendations, setShowRecommendations] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
 
   const masterTimetable = useMemo(() => parseMasterTimetable(timetableCsvData), []);
+
+  // handler for screenshot upload and analysis
+  const handleImageUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImageFile(file);
+    setLoading(true);
+
+    try {
+      // convert img to base64
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64String = e.target?.result as string;
+        const base64Data = base64String.split(',')[1]; // remove data:image/jpeg;base64, prefix
+
+        try {
+          // analyze timetable screenshot
+          const analysisResult = await analyzeTimetable(base64Data);
+          setStudentClasses(analysisResult.classes);
+          setLoading(false);
+        } catch (error) {
+          console.error('error analyzing timetable:', error);
+          setLoading(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('error uploading image:', error);
+      setLoading(false);
+    }
+  }, []);
 
   const handleBatchSelection = async (batchId: string) => {
     setSelectedBatch(batchId);
@@ -165,8 +208,9 @@ export default function Dashboard() {
       
       // gen recommendations for the selected batch
       const recommendationResult = await generateCourseRecommendations(
-        [],
-        batchCourses,
+        studentClasses,
+        masterTimetable,
+        batchId,
         25
       );
       
@@ -231,7 +275,19 @@ export default function Dashboard() {
               </p>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-6 mb-8">
+            <div className="grid md:grid-cols-4 gap-6 mb-8">
+              <Card className="text-center">
+                <CardHeader>
+                  <Upload className="h-8 w-8 text-orange-600 mx-auto mb-2" />
+                  <CardTitle className="text-lg">Upload Timetable</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-600">
+                    Upload your current timetable screenshot (optional)
+                  </p>
+                </CardContent>
+              </Card>
+
               <Card className="text-center">
                 <CardHeader>
                   <Users className="h-8 w-8 text-blue-600 mx-auto mb-2" />
@@ -268,6 +324,53 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* timetable upload section */}
+            <Card className="max-w-4xl mx-auto mb-6">
+              <CardHeader>
+                <CardTitle className="text-xl text-center flex items-center justify-center">
+                  <Upload className="h-5 w-5 mr-2" />
+                  Upload Your Current Timetable (Optional)
+                </CardTitle>
+                <CardDescription className="text-center">
+                  Upload a screenshot of your current timetable to get better elective recommendations
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-col items-center space-y-4">
+                  <div className="w-full max-w-xs">
+                    <label htmlFor="timetable-upload" className="block text-sm font-medium text-gray-700 mb-2">
+                      Select timetable image
+                    </label>
+                    <input
+                      id="timetable-upload"
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                    />
+                  </div>
+                  
+                  {imageFile && (
+                    <div className="text-center">
+                      <p className="text-sm text-green-600 mb-2">✓ Uploaded: {imageFile.name}</p>
+                      {studentClasses.length > 0 && (
+                        <div className="text-left max-w-md mx-auto">
+                          <p className="text-sm font-medium text-gray-700 mb-2">Detected classes:</p>
+                          <div className="space-y-1">
+                            {studentClasses.map((cls, index) => (
+                              <div key={index} className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
+                                {cls.courseName} ({cls.courseCode}) - {cls.day} {cls.startTime}-{cls.endTime}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
 
             <Card className="max-w-4xl mx-auto">
               <CardHeader>
@@ -397,6 +500,8 @@ export default function Dashboard() {
                   setAvailableCourses([]);
                   setRecommendations([]);
                   setShowRecommendations(false);
+                  setStudentClasses([]);
+                  setImageFile(null);
                 }}
                 variant="outline"
                 size="lg"
