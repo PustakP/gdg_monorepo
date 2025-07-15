@@ -25,8 +25,33 @@ interface Course {
   studentSet?: string;
 }
 
+// types for ai response structures
+interface TimetableAnalysisResponse {
+  classes: StudentClass[];
+}
+
+interface RecommendationResponse {
+  recommendations: Array<{
+    combination: Array<{
+      courseName: string;
+      courseCode: string;
+      credits: number;
+      day: string;
+      startTime: string;
+      endTime: string;
+      reason: string;
+    }>;
+    totalCredits: number;
+    conflictFree: boolean;
+    recommendation: string;
+  }>;
+}
+
+// union type for possible ai response structures
+type AIResponse = TimetableAnalysisResponse | RecommendationResponse;
+
 // helper func to extract json from ai response
-function extractJsonFromResponse(text: string): any {
+function extractJsonFromResponse<T>(text: string): T {
   try {
     // try direct parsing first
     return JSON.parse(text);
@@ -109,7 +134,7 @@ export async function analyzeTimetable(imageBase64: string) {
     console.log('raw timetable analysis response:', text);
     
     // extract json from response
-    const parsedResponse = extractJsonFromResponse(text);
+    const parsedResponse = extractJsonFromResponse<TimetableAnalysisResponse>(text);
     
     // validate response structure
     if (!parsedResponse.classes || !Array.isArray(parsedResponse.classes)) {
@@ -178,7 +203,7 @@ export async function generateCourseRecommendations(
     console.log('raw ai response:', text); // debug logging
     
     // extract json from response
-    const parsedResponse = extractJsonFromResponse(text);
+    const parsedResponse = extractJsonFromResponse<RecommendationResponse>(text);
     
     // validate response structure
     if (!parsedResponse.recommendations || !Array.isArray(parsedResponse.recommendations)) {
