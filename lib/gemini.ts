@@ -164,14 +164,42 @@ export async function analyzeTimetable(imageBase64: string) {
 export async function generateCourseRecommendations(
   studentClasses: StudentClass[], 
   masterTimetable: Course[], 
+  selectedBatch: string,
   maxCredits: number = 25
 ) {
   try {
+    // sep courses into compulsory (from selected batch) and elective (from other batches)
+    const compulsoryCourses = masterTimetable.filter(course => 
+      course.studentSet === selectedBatch
+    );
+    
+    const electiveCourses = masterTimetable.filter(course => 
+      course.studentSet !== selectedBatch
+    );
+    
+    // calc total credits from compulsory courses
+    const compulsoryCredits = compulsoryCourses.reduce((sum, course) => sum + course.credits, 0);
+    
+    // calc remaining credits for electives
+    const remainingCredits = maxCredits - compulsoryCredits;
+    
     const prompt = `
-      Based on the available courses for this batch, suggest combinations of courses they can take.
+      Based on the student's selected batch, generate course recommendations.
       
-      Available courses: ${JSON.stringify(masterTimetable)}
-      Maximum credits allowed: ${maxCredits}
+      COMPULSORY COURSES (must be included): ${JSON.stringify(compulsoryCourses)}
+      ELECTIVE COURSES (choose combinations from these): ${JSON.stringify(electiveCourses)}
+      
+      Selected batch: ${selectedBatch}
+      Compulsory courses credits: ${compulsoryCredits}
+      Remaining credits for electives: ${remainingCredits}
+      Maximum total credits allowed: ${maxCredits}
+      
+      Rules:
+      1. ALL compulsory courses MUST be included in every recommendation
+      2. Suggest different combinations of elective courses
+      3. Total credits (compulsory + electives) must not exceed ${maxCredits}
+      4. Check for time conflicts between compulsory and elective courses
+      5. Prioritize electives that complement the compulsory courses
       
       IMPORTANT: Respond with ONLY valid JSON in exactly this format:
       {
@@ -185,12 +213,12 @@ export async function generateCourseRecommendations(
                 "day": "Tuesday",
                 "startTime": "11:00",
                 "endTime": "12:30",
-                "reason": "Good foundational course for your batch"
+                "reason": "Compulsory course for your batch" or "Elective that complements your core subjects"
               }
             ],
-            "totalCredits": 15,
+            "totalCredits": 18,
             "conflictFree": true,
-            "recommendation": "This combination provides a good balance of core and elective courses"
+            "recommendation": "This combination includes all compulsory courses plus recommended electives"
           }
         ]
       }
@@ -215,21 +243,50 @@ export async function generateCourseRecommendations(
     console.error('error generating recommendations:', error);
     
     // fallback response if ai fails
+    const compulsoryCourses = masterTimetable.filter(course => 
+      course.studentSet === selectedBatch
+    );
+    
+    const electiveCourses = masterTimetable.filter(course => 
+      course.studentSet !== selectedBatch
+    );
+    
+    const compulsoryCredits = compulsoryCourses.reduce((sum, course) => sum + course.credits, 0);
+    const remainingCredits = maxCredits - compulsoryCredits;
+    
+    // create fallback combo with all compulsory + some electives
+    const fallbackElectives = electiveCourses.slice(0, 2).filter(course => 
+      compulsoryCredits + course.credits <= maxCredits
+    );
+    
+    const fallbackCombination = [
+      ...compulsoryCourses.map(course => ({
+        courseName: course.courseName,
+        courseCode: course.courseCode,
+        credits: course.credits,
+        day: course.day,
+        startTime: course.startTime,
+        endTime: course.endTime,
+        reason: "compulsory course for your batch"
+      })),
+      ...fallbackElectives.map(course => ({
+        courseName: course.courseName,
+        courseCode: course.courseCode,
+        credits: course.credits,
+        day: course.day,
+        startTime: course.startTime,
+        endTime: course.endTime,
+        reason: "elective course from other batches"
+      }))
+    ];
+    
     return {
       recommendations: [
         {
-          combination: masterTimetable.slice(0, 3).map(course => ({
-            courseName: course.courseName,
-            courseCode: course.courseCode,
-            credits: course.credits,
-            day: course.day,
-            startTime: course.startTime,
-            endTime: course.endTime,
-            reason: "automatically selected from available courses"
-          })),
-          totalCredits: masterTimetable.slice(0, 3).reduce((sum, course) => sum + course.credits, 0),
+          combination: fallbackCombination,
+          totalCredits: fallbackCombination.reduce((sum, course) => sum + course.credits, 0),
           conflictFree: true,
-          recommendation: "basic selection of available courses (ai recommendation failed)"
+          recommendation: "basic selection with compulsory courses + electives (ai recommendation failed)"
         }
       ]
     };
